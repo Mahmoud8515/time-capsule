@@ -256,27 +256,11 @@ function App() {
 
           {/* زر الميديا الموحّد */}
           <div className="tc-rec-row">
-            <button className="tc-btn tc-btn-rec" onClick={() => setShowMediaMenu(!showMediaMenu)}>
-              📎 Add Media
-            </button>
+            <label className="tc-btn tc-btn-rec tc-media-btn-single">
+              📸 Add Media
+              <input type="file" accept="image/*,video/*" onChange={handleMediaPick} hidden />
+            </label>
           </div>
-
-          {showMediaMenu && (
-            <div className="tc-media-menu">
-              <label className="tc-media-opt">
-                📸 Take Photo
-                <input type="file" accept="image/*" capture="environment" onChange={handleMediaPick} hidden />
-              </label>
-              <label className="tc-media-opt">
-                🎥 Record Video
-                <input type="file" accept="video/*" capture="environment" onChange={handleMediaPick} hidden />
-              </label>
-              <label className="tc-media-opt">
-                🖼️ From Gallery
-                <input type="file" accept="image/*,video/*" onChange={handleMediaPick} hidden />
-              </label>
-            </div>
-          )}
 
           {mediaPreview && (
             <div className="tc-preview">
@@ -417,6 +401,7 @@ function Styles() {
       .tc-rec-row { margin: 14px 0; }
       .tc-btn-rec { background: rgba(120,80,40,0.12); border-color: #bfa478; color: #6b4e28; width: 100%; font-size: 0.95rem; }
       .tc-btn-rec:hover { background: rgba(120,80,40,0.2); }
+      .tc-media-btn-single { display: block; width: 100%; text-align: center; }
       .tc-btn-stop { background: linear-gradient(135deg, #9c3b2e, #7a2820); color: #f3e7cc; border-color: #5a1c16; width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; }
       .tc-pulse { width: 10px; height: 10px; border-radius: 50%; background: #f3e7cc; display: inline-block; animation: pulse 1s infinite; }
       .tc-media-menu { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 8px; padding: 12px; background: rgba(120,80,40,0.08); border: 1px dashed #bfa478; border-radius: 5px; }
