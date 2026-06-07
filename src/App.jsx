@@ -40,14 +40,16 @@ function App() {
 
   async function handleSignUp() {
     setMessage('')
-    const { error } = await supabase.auth.signUp({ email, password })
+    const cleanEmail = email.trim().toLowerCase()
+    const { error } = await supabase.auth.signUp({ email: cleanEmail, password })
     if (error) setMessage('Error: ' + error.message)
     else setMessage('Account created! You can sign in now.')
   }
 
   async function handleSignIn() {
     setMessage('')
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    const cleanEmail = email.trim().toLowerCase()
+    const { error } = await supabase.auth.signInWithPassword({ email: cleanEmail, password })
     if (error) setMessage('Error: ' + error.message)
   }
 
