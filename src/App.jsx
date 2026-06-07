@@ -57,13 +57,23 @@ function App() {
     setMessage('')
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const recorder = new MediaRecorder(stream)
+      // اختيار صيغة يدعمها الجهاز (الآيفون يفضّل mp4، غيره webm)
+      let mimeType = ''
+      if (MediaRecorder.isTypeSupported('audio/mp4')) {
+        mimeType = 'audio/mp4'
+      } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+        mimeType = 'audio/webm'
+      }
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream)
       chunksRef.current = []
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data)
       }
       recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' })
+        const type = recorder.mimeType || 'audio/mp4'
+        const blob = new Blob(chunksRef.current, { type })
         setAudioBlob(blob)
         setAudioPreviewUrl(URL.createObjectURL(blob))
         stream.getTracks().forEach((t) => t.stop())
@@ -98,7 +108,8 @@ function App() {
     let audioUrl = null
 
     if (audioBlob) {
-      const fileName = `${session.user.id}/${Date.now()}.webm`
+      const ext = audioBlob.type.includes('mp4') ? 'mp4' : 'webm'
+      const fileName = `${session.user.id}/${Date.now()}.${ext}`
       const { error: uploadError } = await supabase.storage
         .from('recordings')
         .upload(fileName, audioBlob)
