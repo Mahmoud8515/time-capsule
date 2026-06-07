@@ -16,6 +16,13 @@ function App() {
   const [recording, setRecording] = useState(false)
   const [audioBlob, setAudioBlob] = useState(null)
   const [audioPreviewUrl, setAudioPreviewUrl] = useState(null)
+
+  // ميديا موحّدة (صورة أو فيديو)
+  const [mediaFile, setMediaFile] = useState(null)
+  const [mediaPreview, setMediaPreview] = useState(null)
+  const [mediaType, setMediaType] = useState(null) // 'image' | 'video'
+  const [showMediaMenu, setShowMediaMenu] = useState(false)
+
   const [saving, setSaving] = useState(false)
   const mediaRecorderRef = useRef(null)
   const chunksRef = useRef([])
@@ -64,13 +71,9 @@ function App() {
       let mimeType = ''
       if (MediaRecorder.isTypeSupported('audio/mp4')) mimeType = 'audio/mp4'
       else if (MediaRecorder.isTypeSupported('audio/webm')) mimeType = 'audio/webm'
-      const recorder = mimeType
-        ? new MediaRecorder(stream, { mimeType })
-        : new MediaRecorder(stream)
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream)
       chunksRef.current = []
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data)
-      }
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data) }
       recorder.onstop = () => {
         const type = recorder.mimeType || 'audio/mp4'
         const blob = new Blob(chunksRef.current, { type })
@@ -93,10 +96,41 @@ function App() {
     }
   }
 
+  // اختيار ميديا (يكتشف النوع تلقائياً)
+  function handleMediaPick(e) {
+    const file = e.target.files[0]
+    setShowMediaMenu(false)
+    if (!file) return
+    if (file.size > 50 * 1024 * 1024) {
+      setMessage('File too large (max 50MB). Try a shorter clip.')
+      e.target.value = ''
+      return
+    }
+    const type = file.type.startsWith('video') ? 'video' : 'image'
+    setMediaFile(file)
+    setMediaType(type)
+    setMediaPreview(URL.createObjectURL(file))
+    e.target.value = ''
+  }
+
+  function clearMedia() {
+    setMediaFile(null)
+    setMediaPreview(null)
+    setMediaType(null)
+  }
+
+  async function uploadFile(file, folder, ext) {
+    const fileName = `${session.user.id}/${folder}/${Date.now()}.${ext}`
+    const { error } = await supabase.storage.from('recordings').upload(fileName, file)
+    if (error) throw error
+    const { data } = supabase.storage.from('recordings').getPublicUrl(fileName)
+    return data.publicUrl
+  }
+
   async function handleSaveMessage() {
     setMessage('')
-    if (!text && !audioBlob) {
-      setMessage('Please write a message or record audio.')
+    if (!text && !audioBlob && !mediaFile) {
+      setMessage('Please add a message, voice, photo, or video.')
       return
     }
     if (!unlockDate) {
@@ -104,40 +138,40 @@ function App() {
       return
     }
     setSaving(true)
-    let audioUrl = null
-    if (audioBlob) {
-      const ext = audioBlob.type.includes('mp4') ? 'mp4' : 'webm'
-      const fileName = `${session.user.id}/${Date.now()}.${ext}`
-      const { error: uploadError } = await supabase.storage
-        .from('recordings')
-        .upload(fileName, audioBlob)
-      if (uploadError) {
-        setMessage('Upload error: ' + uploadError.message)
-        setSaving(false)
-        return
+    try {
+      let audioUrl = null, imageUrl = null, videoUrl = null
+
+      if (audioBlob) {
+        const ext = audioBlob.type.includes('mp4') ? 'mp4' : 'webm'
+        audioUrl = await uploadFile(audioBlob, 'audio', ext)
       }
-      const { data: urlData } = supabase.storage.from('recordings').getPublicUrl(fileName)
-      audioUrl = urlData.publicUrl
-    }
-    const { error } = await supabase.from('messages').insert({
-      user_id: session.user.id,
-      text_content: text || null,
-      audio_url: audioUrl,
-      unlock_date: new Date(unlockDate).toISOString(),
-      recipient_email: recipientEmail.trim().toLowerCase() || null,
-    })
-    setSaving(false)
-    if (error) {
-      setMessage('Error: ' + error.message)
-    } else {
-      setText('')
-      setUnlockDate('')
-      setRecipientEmail('')
-      setAudioBlob(null)
-      setAudioPreviewUrl(null)
+      if (mediaFile) {
+        const ext = mediaFile.name.split('.').pop() || (mediaType === 'video' ? 'mp4' : 'jpg')
+        const url = await uploadFile(mediaFile, mediaType === 'video' ? 'videos' : 'images', ext)
+        if (mediaType === 'video') videoUrl = url
+        else imageUrl = url
+      }
+
+      const { error } = await supabase.from('messages').insert({
+        user_id: session.user.id,
+        text_content: text || null,
+        audio_url: audioUrl,
+        image_url: imageUrl,
+        video_url: videoUrl,
+        unlock_date: new Date(unlockDate).toISOString(),
+        recipient_email: recipientEmail.trim().toLowerCase() || null,
+      })
+      if (error) throw error
+
+      setText(''); setUnlockDate(''); setRecipientEmail('')
+      setAudioBlob(null); setAudioPreviewUrl(null)
+      clearMedia()
       setMessage('Message sealed! 🎉')
       loadMessages()
+    } catch (err) {
+      setMessage('Error: ' + err.message)
     }
+    setSaving(false)
   }
 
   async function handleDelete(id) {
@@ -163,7 +197,6 @@ function App() {
         <Styles />
         <div className="tc-wrap" dir="ltr">
           <div className="tc-card tc-auth">
-            
             <h1 className="tc-title">Time Capsule</h1>
             <p className="tc-sub">Seal a message. Open it in the future.</p>
             <input className="tc-input" type="email" placeholder="Email"
@@ -204,6 +237,7 @@ function App() {
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
+
           <div className="tc-rec-row">
             {!recording ? (
               <button className="tc-btn tc-btn-rec" onClick={startRecording}>🪶 Record Voice</button>
@@ -215,10 +249,47 @@ function App() {
           </div>
           {audioPreviewUrl && (
             <div className="tc-preview">
-              <p className="tc-preview-label">Preview:</p>
+              <p className="tc-preview-label">Voice preview:</p>
               <audio controls src={audioPreviewUrl} className="tc-audio" />
             </div>
           )}
+
+          {/* زر الميديا الموحّد */}
+          <div className="tc-rec-row">
+            <button className="tc-btn tc-btn-rec" onClick={() => setShowMediaMenu(!showMediaMenu)}>
+              📎 Add Media
+            </button>
+          </div>
+
+          {showMediaMenu && (
+            <div className="tc-media-menu">
+              <label className="tc-media-opt">
+                📸 Take Photo
+                <input type="file" accept="image/*" capture="environment" onChange={handleMediaPick} hidden />
+              </label>
+              <label className="tc-media-opt">
+                🎥 Record Video
+                <input type="file" accept="video/*" capture="environment" onChange={handleMediaPick} hidden />
+              </label>
+              <label className="tc-media-opt">
+                🖼️ From Gallery
+                <input type="file" accept="image/*,video/*" onChange={handleMediaPick} hidden />
+              </label>
+            </div>
+          )}
+
+          {mediaPreview && (
+            <div className="tc-preview">
+              <div className="tc-preview-head">
+                <span className="tc-preview-label">{mediaType === 'video' ? 'Video' : 'Photo'} preview:</span>
+                <button className="tc-clear-media" onClick={clearMedia}>✕ remove</button>
+              </div>
+              {mediaType === 'video'
+                ? <video controls src={mediaPreview} className="tc-media-preview" />
+                : <img src={mediaPreview} className="tc-media-preview" alt="preview" />}
+            </div>
+          )}
+
           <label className="tc-label">Send to (optional)</label>
           <input
             className="tc-input"
@@ -263,15 +334,13 @@ function App() {
                 {isMine && (
                   <button className="tc-delete" onClick={() => handleDelete(m.id)} title="Delete">✕</button>
                 )}
-                {isMine && m.recipient_email && (
-                  <p className="tc-tag">✉ to {m.recipient_email}</p>
-                )}
-                {!isMine && (
-                  <p className="tc-tag">✉ a sealed message for you</p>
-                )}
+                {isMine && m.recipient_email && <p className="tc-tag">✉ to {m.recipient_email}</p>}
+                {!isMine && <p className="tc-tag">✉ a sealed message for you</p>}
                 {unlocked ? (
                   <>
                     {m.text_content && <p className="tc-msg-text">{m.text_content}</p>}
+                    {m.image_url && <img src={m.image_url} className="tc-media-preview" alt="" />}
+                    {m.video_url && <video controls src={m.video_url} className="tc-media-preview" />}
                     {m.audio_url && <audio controls src={m.audio_url} className="tc-audio" />}
                     <span className="tc-badge tc-badge-open">✦ Unlocked</span>
                   </>
@@ -298,14 +367,11 @@ function App() {
 function Styles() {
   return (
     <style>{`
-      @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=EB+Garamond:ital@0;1&display=swap');
-
+      @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&display=swap');
       * { box-sizing: border-box; }
       body {
-        margin: 0;
-        min-height: 100vh;
-        font-family: 'Cormorant Garamond', serif;
-        color: #f0e6d2;
+        margin: 0; min-height: 100vh;
+        font-family: 'Cormorant Garamond', serif; color: #f0e6d2;
         background-color: #1a1310;
         background-image:
           radial-gradient(ellipse at 50% 0%, rgba(120,85,45,0.25) 0%, transparent 55%),
@@ -313,184 +379,72 @@ function Styles() {
           linear-gradient(160deg, #1f1712 0%, #140e0a 100%);
         background-attachment: fixed;
       }
-
       .tc-wrap { max-width: 580px; margin: 0 auto; padding: 36px 18px 50px; }
-
-      /* العناوين بخط كلاسيكي منقوش */
-      .tc-title {
-        font-family: 'Cinzel', serif; font-weight: 700;
-        font-size: 2.4rem; margin: 10px 0 4px;
-        color: #e8c074; letter-spacing: 1px;
-        text-shadow: 0 2px 8px rgba(0,0,0,0.5);
-      }
+      .tc-title { font-family: 'Cinzel', serif; font-weight: 700; font-size: 2.4rem; margin: 10px 0 4px; color: #e8c074; letter-spacing: 1px; text-shadow: 0 2px 8px rgba(0,0,0,0.5); }
       .tc-title-sm { font-size: 1.4rem; margin: 0; letter-spacing: 0.5px; }
       .tc-sub { color: #b89968; margin: 0 0 24px; font-size: 1.2rem; font-style: italic; }
       .tc-email { color: #8a7355; margin: 2px 0 0; font-size: 0.95rem; font-style: italic; }
-
       .tc-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 26px; }
-
-      /* البطاقة = ورق قديم فاتح */
       .tc-card {
-        background:
-          radial-gradient(circle at 15% 20%, rgba(180,150,110,0.12) 0%, transparent 40%),
-          linear-gradient(135deg, #f3e7cc 0%, #e8d7b3 100%);
-        color: #3a2c1a;
-        border: 1px solid #c9b186;
-        border-radius: 6px;
-        padding: 28px;
-        margin-bottom: 30px;
-        box-shadow:
-          0 14px 40px rgba(0,0,0,0.5),
-          inset 0 0 0 2px rgba(180,150,110,0.3),
-          inset 0 0 60px rgba(160,120,70,0.15);
-        position: relative;
-        animation: rise 0.5s ease both;
+        background: radial-gradient(circle at 15% 20%, rgba(180,150,110,0.12) 0%, transparent 40%), linear-gradient(135deg, #f3e7cc 0%, #e8d7b3 100%);
+        color: #3a2c1a; border: 1px solid #c9b186; border-radius: 6px; padding: 28px; margin-bottom: 30px;
+        box-shadow: 0 14px 40px rgba(0,0,0,0.5), inset 0 0 0 2px rgba(180,150,110,0.3), inset 0 0 60px rgba(160,120,70,0.15);
+        position: relative; animation: rise 0.5s ease both;
       }
-      .tc-card::before {
-        content: ''; position: absolute; inset: 7px;
-        border: 1px solid rgba(120,90,50,0.35); border-radius: 3px;
-        pointer-events: none;
-      }
+      .tc-card::before { content: ''; position: absolute; inset: 7px; border: 1px solid rgba(120,90,50,0.35); border-radius: 3px; pointer-events: none; }
       .tc-auth { text-align: center; margin-top: 7vh; }
-      .tc-logo { font-size: 2.8rem; }
       .tc-auth .tc-title { color: #7a5a2e; }
       .tc-auth .tc-sub { color: #6b5436; }
-
-      .tc-h3 {
-        font-family: 'Cinzel', serif; font-weight: 600; font-size: 1.2rem;
-        margin: 0 0 18px; color: #5a3e1e; text-align: center;
-        letter-spacing: 0.5px;
-      }
-      .tc-h3::after {
-        content: '❦'; display: block; color: #a8743a;
-        font-size: 1rem; margin-top: 6px;
-      }
-
-      .tc-count {
-        background: #7a5a2e; color: #f3e7cc; font-family: 'Cinzel', serif;
-        font-size: 0.7rem; font-weight: 600; padding: 2px 9px;
-        border-radius: 20px; margin-left: 4px; vertical-align: middle;
-      }
-
-      .tc-input {
-        display: block; width: 100%; padding: 12px 14px; margin: 8px 0;
-        background: rgba(255,252,244,0.7); border: 1px solid #bfa478;
-        border-radius: 4px; color: #3a2c1a;
-        font-family: 'Cormorant Garamond', serif; font-size: 1.1rem;
-        transition: border-color 0.2s, box-shadow 0.2s;
-      }
-      .tc-input:focus {
-        outline: none; border-color: #8a5a28;
-        box-shadow: 0 0 0 3px rgba(168,116,58,0.2);
-        background: #fffdf6;
-      }
+      .tc-h3 { font-family: 'Cinzel', serif; font-weight: 600; font-size: 1.2rem; margin: 0 0 18px; color: #5a3e1e; text-align: center; letter-spacing: 0.5px; }
+      .tc-h3::after { content: '❦'; display: block; color: #a8743a; font-size: 1rem; margin-top: 6px; }
+      .tc-count { background: #7a5a2e; color: #f3e7cc; font-family: 'Cinzel', serif; font-size: 0.7rem; font-weight: 600; padding: 2px 9px; border-radius: 20px; margin-left: 4px; vertical-align: middle; }
+      .tc-input { display: block; width: 100%; padding: 12px 14px; margin: 8px 0; background: rgba(255,252,244,0.7); border: 1px solid #bfa478; border-radius: 4px; color: #3a2c1a; font-family: 'Cormorant Garamond', serif; font-size: 1.1rem; transition: border-color 0.2s, box-shadow 0.2s; }
+      .tc-input:focus { outline: none; border-color: #8a5a28; box-shadow: 0 0 0 3px rgba(168,116,58,0.2); background: #fffdf6; }
       .tc-input::placeholder { color: #9a8867; font-style: italic; }
       .tc-textarea { height: 90px; resize: vertical; line-height: 1.5; }
-      .tc-label {
-        display: block; margin: 14px 0 2px; color: #6b4e28;
-        font-size: 1rem; font-weight: 600; font-family: 'Cinzel', serif;
-        letter-spacing: 0.3px;
-      }
-
-      .tc-btn {
-        padding: 12px 22px; border-radius: 5px; cursor: pointer;
-        font-family: 'Cinzel', serif; font-weight: 600; font-size: 0.95rem;
-        border: 1px solid transparent; transition: transform 0.12s, filter 0.2s;
-        letter-spacing: 0.5px;
-      }
+      .tc-label { display: block; margin: 14px 0 2px; color: #6b4e28; font-size: 1rem; font-weight: 600; font-family: 'Cinzel', serif; letter-spacing: 0.3px; }
+      .tc-btn { padding: 12px 22px; border-radius: 5px; cursor: pointer; font-family: 'Cinzel', serif; font-weight: 600; font-size: 0.95rem; border: 1px solid transparent; transition: transform 0.12s, filter 0.2s; letter-spacing: 0.5px; }
       .tc-btn:active { transform: scale(0.97); }
-      /* زر أساسي بلون ختم الشمع */
-      .tc-btn-primary {
-        background: linear-gradient(135deg, #9c3b2e 0%, #7a2820 100%);
-        color: #f3e7cc; border-color: #5a1c16;
-        box-shadow: 0 3px 8px rgba(0,0,0,0.3);
-      }
+      .tc-btn-primary { background: linear-gradient(135deg, #9c3b2e 0%, #7a2820 100%); color: #f3e7cc; border-color: #5a1c16; box-shadow: 0 3px 8px rgba(0,0,0,0.3); }
       .tc-btn-primary:hover { filter: brightness(1.1); }
       .tc-btn-primary:disabled { opacity: 0.6; cursor: default; }
-      .tc-btn-ghost {
-        background: rgba(255,252,244,0.4); border-color: #bfa478; color: #5a3e1e;
-      }
+      .tc-btn-ghost { background: rgba(255,252,244,0.4); border-color: #bfa478; color: #5a3e1e; }
       .tc-btn-ghost:hover { background: rgba(255,252,244,0.7); }
       .tc-btn-sm { padding: 8px 16px; font-size: 0.8rem; }
       .tc-btn-full { width: 100%; margin-top: 18px; }
       .tc-auth-btns { display: flex; gap: 10px; margin-top: 10px; }
       .tc-auth-btns .tc-btn { flex: 1; }
-
       .tc-rec-row { margin: 14px 0; }
-      .tc-btn-rec {
-        background: rgba(120,80,40,0.12); border-color: #bfa478; color: #6b4e28;
-        width: 100%; font-size: 0.95rem;
-      }
+      .tc-btn-rec { background: rgba(120,80,40,0.12); border-color: #bfa478; color: #6b4e28; width: 100%; font-size: 0.95rem; }
       .tc-btn-rec:hover { background: rgba(120,80,40,0.2); }
-      .tc-btn-stop {
-        background: linear-gradient(135deg, #9c3b2e, #7a2820); color: #f3e7cc;
-        border-color: #5a1c16; width: 100%;
-        display: flex; align-items: center; justify-content: center; gap: 8px;
-      }
+      .tc-btn-stop { background: linear-gradient(135deg, #9c3b2e, #7a2820); color: #f3e7cc; border-color: #5a1c16; width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; }
       .tc-pulse { width: 10px; height: 10px; border-radius: 50%; background: #f3e7cc; display: inline-block; animation: pulse 1s infinite; }
-
+      .tc-media-menu { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 8px; padding: 12px; background: rgba(120,80,40,0.08); border: 1px dashed #bfa478; border-radius: 5px; }
+      .tc-media-opt { display: block; text-align: center; padding: 11px; border-radius: 5px; cursor: pointer; background: rgba(255,252,244,0.5); border: 1px solid #bfa478; color: #5a3e1e; font-family: 'Cinzel', serif; font-size: 0.9rem; font-weight: 600; transition: background 0.2s; }
+      .tc-media-opt:hover { background: rgba(255,252,244,0.85); }
+      .tc-media-preview { width: 100%; border-radius: 5px; margin-top: 4px; border: 1px solid #c9b186; max-height: 320px; object-fit: contain; background: #2a1f15; }
       .tc-preview { margin: 12px 0; }
+      .tc-preview-head { display: flex; justify-content: space-between; align-items: center; }
       .tc-preview-label { color: #6b4e28; font-size: 0.95rem; margin: 0 0 6px; font-style: italic; }
-      .tc-audio { width: 100%; height: 38px; }
-
+      .tc-clear-media { background: none; border: none; color: #9c3b2e; cursor: pointer; font-family: 'Cormorant Garamond', serif; font-size: 0.95rem; font-style: italic; }
+      .tc-audio { width: 100%; height: 38px; margin-top: 4px; }
       .tc-msg { color: #6b4e28; font-size: 1rem; margin-top: 14px; text-align: center; font-style: italic; }
       .tc-empty { color: #8a7355; font-style: italic; text-align: center; font-size: 1.1rem; }
-
       .tc-tabs { display: flex; gap: 8px; margin-bottom: 20px; }
-      .tc-tab {
-        flex: 1; padding: 12px; border-radius: 5px; cursor: pointer;
-        background: rgba(243,231,204,0.08); border: 1px solid #5a4632;
-        color: #b89968; font-family: 'Cinzel', serif; font-size: 0.95rem;
-        font-weight: 600; transition: all 0.2s; letter-spacing: 0.5px;
-      }
-      .tc-tab.active {
-        background: linear-gradient(135deg, #3a2c1a, #2a1f12);
-        color: #e8c074; border-color: #a8743a;
-        box-shadow: inset 0 0 12px rgba(168,116,58,0.2);
-      }
-
-      /* بطاقات الرسائل = ورق قديم */
-      .tc-msg-card {
-        position: relative;
-        background: linear-gradient(135deg, #f3e7cc 0%, #e6d4ad 100%);
-        color: #3a2c1a; border: 1px solid #c9b186;
-        border-radius: 5px; padding: 20px; margin-bottom: 16px;
-        box-shadow: 0 8px 24px rgba(0,0,0,0.4), inset 0 0 0 1px rgba(180,150,110,0.3);
-        animation: rise 0.4s ease both;
-      }
-      .tc-msg-card.locked {
-        text-align: center;
-        background: linear-gradient(135deg, #ece0c4 0%, #ddc9a0 100%);
-      }
+      .tc-tab { flex: 1; padding: 12px; border-radius: 5px; cursor: pointer; background: rgba(243,231,204,0.08); border: 1px solid #5a4632; color: #b89968; font-family: 'Cinzel', serif; font-size: 0.95rem; font-weight: 600; transition: all 0.2s; letter-spacing: 0.5px; }
+      .tc-tab.active { background: linear-gradient(135deg, #3a2c1a, #2a1f12); color: #e8c074; border-color: #a8743a; box-shadow: inset 0 0 12px rgba(168,116,58,0.2); }
+      .tc-msg-card { position: relative; background: linear-gradient(135deg, #f3e7cc 0%, #e6d4ad 100%); color: #3a2c1a; border: 1px solid #c9b186; border-radius: 5px; padding: 20px; margin-bottom: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.4), inset 0 0 0 1px rgba(180,150,110,0.3); animation: rise 0.4s ease both; }
+      .tc-msg-card.locked { text-align: center; background: linear-gradient(135deg, #ece0c4 0%, #ddc9a0 100%); }
       .tc-msg-card.unlocked { border-left: 4px solid #9c3b2e; }
-
       .tc-tag { font-size: 0.9rem; color: #8a5a28; margin: 0 0 10px; font-style: italic; }
       .tc-msg-text { margin: 0 0 12px; line-height: 1.6; color: #2e2114; font-size: 1.2rem; }
       .tc-wax { font-size: 1.8rem; margin-bottom: 6px; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.3)); }
       .tc-locked-text { color: #6b4e28; margin: 0; font-size: 1rem; font-style: italic; }
-      .tc-locked-date {
-        color: #7a2820; margin: 3px 0 0; font-family: 'Cinzel', serif;
-        font-size: 1.05rem; font-weight: 600;
-      }
-
-      .tc-badge {
-        display: inline-block; font-size: 0.8rem; font-weight: 600; padding: 3px 12px;
-        border-radius: 20px; margin-top: 8px; font-family: 'Cinzel', serif;
-        background: rgba(156,59,46,0.15); color: #9c3b2e;
-      }
-
-      .tc-delete {
-        position: absolute; top: 12px; right: 12px; width: 26px; height: 26px;
-        border-radius: 50%; background: transparent; border: none; color: #a89070;
-        cursor: pointer; font-size: 0.95rem; transition: color 0.2s, background 0.2s;
-      }
+      .tc-locked-date { color: #7a2820; margin: 3px 0 0; font-family: 'Cinzel', serif; font-size: 1.05rem; font-weight: 600; }
+      .tc-badge { display: inline-block; font-size: 0.8rem; font-weight: 600; padding: 3px 12px; border-radius: 20px; margin-top: 8px; font-family: 'Cinzel', serif; background: rgba(156,59,46,0.15); color: #9c3b2e; }
+      .tc-delete { position: absolute; top: 12px; right: 12px; width: 26px; height: 26px; border-radius: 50%; background: transparent; border: none; color: #a89070; cursor: pointer; font-size: 0.95rem; transition: color 0.2s, background 0.2s; }
       .tc-delete:hover { color: #9c3b2e; background: rgba(156,59,46,0.12); }
-
-      .tc-footer {
-        text-align: center; color: #6b5436; font-size: 1.3rem;
-        margin-top: 30px; letter-spacing: 8px;
-      }
-
+      .tc-footer { text-align: center; color: #6b5436; font-size: 1.3rem; margin-top: 30px; letter-spacing: 8px; }
       @keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
       @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
     `}</style>
