@@ -11,7 +11,7 @@ function App() {
   const [unlockDate, setUnlockDate] = useState('')
   const [recipientEmail, setRecipientEmail] = useState('')
   const [messages, setMessages] = useState([])
-  const [tab, setTab] = useState('mine') // mine | received
+  const [tab, setTab] = useState('mine')
 
   const [recording, setRecording] = useState(false)
   const [audioBlob, setAudioBlob] = useState(null)
@@ -62,11 +62,8 @@ function App() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       let mimeType = ''
-      if (MediaRecorder.isTypeSupported('audio/mp4')) {
-        mimeType = 'audio/mp4'
-      } else if (MediaRecorder.isTypeSupported('audio/webm')) {
-        mimeType = 'audio/webm'
-      }
+      if (MediaRecorder.isTypeSupported('audio/mp4')) mimeType = 'audio/mp4'
+      else if (MediaRecorder.isTypeSupported('audio/webm')) mimeType = 'audio/webm'
       const recorder = mimeType
         ? new MediaRecorder(stream, { mimeType })
         : new MediaRecorder(stream)
@@ -106,10 +103,8 @@ function App() {
       setMessage('Please choose an unlock date.')
       return
     }
-
     setSaving(true)
     let audioUrl = null
-
     if (audioBlob) {
       const ext = audioBlob.type.includes('mp4') ? 'mp4' : 'webm'
       const fileName = `${session.user.id}/${Date.now()}.${ext}`
@@ -124,7 +119,6 @@ function App() {
       const { data: urlData } = supabase.storage.from('recordings').getPublicUrl(fileName)
       audioUrl = urlData.publicUrl
     }
-
     const { error } = await supabase.from('messages').insert({
       user_id: session.user.id,
       text_content: text || null,
@@ -132,7 +126,6 @@ function App() {
       unlock_date: new Date(unlockDate).toISOString(),
       recipient_email: recipientEmail.trim().toLowerCase() || null,
     })
-
     setSaving(false)
     if (error) {
       setMessage('Error: ' + error.message)
@@ -158,9 +151,7 @@ function App() {
   }
 
   const myEmail = session?.user?.email?.toLowerCase()
-  // رسائلي = اللي أنشأتها أنا
   const mineMessages = messages.filter((m) => m.user_id === session?.user?.id)
-  // المستلمة = مرسلة لإيميلي ومن شخص آخر
   const receivedMessages = messages.filter(
     (m) => m.recipient_email === myEmail && m.user_id !== session?.user?.id
   )
@@ -172,7 +163,7 @@ function App() {
         <Styles />
         <div className="tc-wrap" dir="ltr">
           <div className="tc-card tc-auth">
-            <div className="tc-logo">🕰️</div>
+            
             <h1 className="tc-title">Time Capsule</h1>
             <p className="tc-sub">Seal a message. Open it in the future.</p>
             <input className="tc-input" type="email" placeholder="Email"
@@ -199,7 +190,7 @@ function App() {
       <div className="tc-wrap" dir="ltr">
         <header className="tc-header">
           <div>
-            <h1 className="tc-title tc-title-sm">🕰️ Time Capsule</h1>
+            <h1 className="tc-title tc-title-sm">Time Capsule</h1>
             <p className="tc-email">{session.user.email}</p>
           </div>
           <button className="tc-btn tc-btn-ghost tc-btn-sm" onClick={handleSignOut}>Sign Out</button>
@@ -213,24 +204,21 @@ function App() {
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
-
           <div className="tc-rec-row">
             {!recording ? (
-              <button className="tc-btn tc-btn-rec" onClick={startRecording}>🎤 Record Voice</button>
+              <button className="tc-btn tc-btn-rec" onClick={startRecording}>🪶 Record Voice</button>
             ) : (
               <button className="tc-btn tc-btn-stop" onClick={stopRecording}>
                 <span className="tc-pulse" /> Stop Recording
               </button>
             )}
           </div>
-
           {audioPreviewUrl && (
             <div className="tc-preview">
               <p className="tc-preview-label">Preview:</p>
               <audio controls src={audioPreviewUrl} className="tc-audio" />
             </div>
           )}
-
           <label className="tc-label">Send to (optional)</label>
           <input
             className="tc-input"
@@ -239,7 +227,6 @@ function App() {
             value={recipientEmail}
             onChange={(e) => setRecipientEmail(e.target.value)}
           />
-
           <label className="tc-label">Unlock date</label>
           <input
             className="tc-input"
@@ -247,25 +234,17 @@ function App() {
             value={unlockDate}
             onChange={(e) => setUnlockDate(e.target.value)}
           />
-
           <button className="tc-btn tc-btn-primary tc-btn-full" onClick={handleSaveMessage} disabled={saving}>
-            {saving ? 'Sealing...' : '🔒 Seal Message'}
+            {saving ? 'Sealing...' : '🕯️ Seal Message'}
           </button>
           {message && <p className="tc-msg">{message}</p>}
         </div>
 
-        {/* تبويبات */}
         <div className="tc-tabs">
-          <button
-            className={`tc-tab ${tab === 'mine' ? 'active' : ''}`}
-            onClick={() => setTab('mine')}
-          >
+          <button className={`tc-tab ${tab === 'mine' ? 'active' : ''}`} onClick={() => setTab('mine')}>
             My Messages <span className="tc-count">{mineMessages.length}</span>
           </button>
-          <button
-            className={`tc-tab ${tab === 'received' ? 'active' : ''}`}
-            onClick={() => setTab('received')}
-          >
+          <button className={`tc-tab ${tab === 'received' ? 'active' : ''}`} onClick={() => setTab('received')}>
             Received <span className="tc-count">{receivedMessages.length}</span>
           </button>
         </div>
@@ -284,9 +263,8 @@ function App() {
                 {isMine && (
                   <button className="tc-delete" onClick={() => handleDelete(m.id)} title="Delete">✕</button>
                 )}
-                {/* وسم: لمن أرسلت / من أرسل */}
                 {isMine && m.recipient_email && (
-                  <p className="tc-tag">→ to {m.recipient_email}</p>
+                  <p className="tc-tag">✉ to {m.recipient_email}</p>
                 )}
                 {!isMine && (
                   <p className="tc-tag">✉ a sealed message for you</p>
@@ -295,11 +273,11 @@ function App() {
                   <>
                     {m.text_content && <p className="tc-msg-text">{m.text_content}</p>}
                     {m.audio_url && <audio controls src={m.audio_url} className="tc-audio" />}
-                    <span className="tc-badge tc-badge-open">✓ Unlocked</span>
+                    <span className="tc-badge tc-badge-open">✦ Unlocked</span>
                   </>
                 ) : (
                   <>
-                    <div className="tc-lock-icon">🔒</div>
+                    <div className="tc-wax">🔴</div>
                     <p className="tc-locked-text">Sealed until</p>
                     <p className="tc-locked-date">
                       {new Date(m.unlock_date).toLocaleString('en-GB', { timeZone: 'Europe/London', dateStyle: 'medium', timeStyle: 'short' })}
@@ -310,6 +288,8 @@ function App() {
             )
           })}
         </div>
+
+        <footer className="tc-footer">✦ ❦ ✦</footer>
       </div>
     </>
   )
@@ -318,118 +298,198 @@ function App() {
 function Styles() {
   return (
     <style>{`
-      @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,900&family=Nunito:wght@400;600;700&display=swap');
+      @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=EB+Garamond:ital@0;1&display=swap');
 
       * { box-sizing: border-box; }
       body {
         margin: 0;
-        background: #1a1410;
-        background-image: radial-gradient(circle at 20% 20%, #2a1f15 0%, #1a1410 55%);
         min-height: 100vh;
-        font-family: 'Nunito', sans-serif;
-        color: #f0e6d8;
+        font-family: 'Cormorant Garamond', serif;
+        color: #f0e6d2;
+        background-color: #1a1310;
+        background-image:
+          radial-gradient(ellipse at 50% 0%, rgba(120,85,45,0.25) 0%, transparent 55%),
+          radial-gradient(ellipse at 80% 90%, rgba(90,60,35,0.2) 0%, transparent 50%),
+          linear-gradient(160deg, #1f1712 0%, #140e0a 100%);
+        background-attachment: fixed;
       }
 
-      .tc-wrap { max-width: 560px; margin: 0 auto; padding: 32px 18px 60px; }
+      .tc-wrap { max-width: 580px; margin: 0 auto; padding: 36px 18px 50px; }
 
+      /* العناوين بخط كلاسيكي منقوش */
       .tc-title {
-        font-family: 'Fraunces', serif; font-weight: 900; font-size: 2.6rem;
-        margin: 8px 0 4px; color: #f5c97a; letter-spacing: -0.5px;
+        font-family: 'Cinzel', serif; font-weight: 700;
+        font-size: 2.4rem; margin: 10px 0 4px;
+        color: #e8c074; letter-spacing: 1px;
+        text-shadow: 0 2px 8px rgba(0,0,0,0.5);
       }
-      .tc-title-sm { font-size: 1.5rem; margin: 0; }
-      .tc-sub { color: #b09a80; margin: 0 0 24px; font-size: 1.05rem; }
-      .tc-email { color: #8a7560; margin: 2px 0 0; font-size: 0.85rem; }
+      .tc-title-sm { font-size: 1.4rem; margin: 0; letter-spacing: 0.5px; }
+      .tc-sub { color: #b89968; margin: 0 0 24px; font-size: 1.2rem; font-style: italic; }
+      .tc-email { color: #8a7355; margin: 2px 0 0; font-size: 0.95rem; font-style: italic; }
 
-      .tc-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
+      .tc-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 26px; }
 
+      /* البطاقة = ورق قديم فاتح */
       .tc-card {
-        background: #241b14; border: 1px solid #3a2c1f; border-radius: 18px;
-        padding: 24px; box-shadow: 0 12px 40px rgba(0,0,0,0.35);
-        margin-bottom: 28px; animation: rise 0.5s ease both;
+        background:
+          radial-gradient(circle at 15% 20%, rgba(180,150,110,0.12) 0%, transparent 40%),
+          linear-gradient(135deg, #f3e7cc 0%, #e8d7b3 100%);
+        color: #3a2c1a;
+        border: 1px solid #c9b186;
+        border-radius: 6px;
+        padding: 28px;
+        margin-bottom: 30px;
+        box-shadow:
+          0 14px 40px rgba(0,0,0,0.5),
+          inset 0 0 0 2px rgba(180,150,110,0.3),
+          inset 0 0 60px rgba(160,120,70,0.15);
+        position: relative;
+        animation: rise 0.5s ease both;
       }
-      .tc-auth { text-align: center; margin-top: 8vh; }
-      .tc-logo { font-size: 3rem; }
+      .tc-card::before {
+        content: ''; position: absolute; inset: 7px;
+        border: 1px solid rgba(120,90,50,0.35); border-radius: 3px;
+        pointer-events: none;
+      }
+      .tc-auth { text-align: center; margin-top: 7vh; }
+      .tc-logo { font-size: 2.8rem; }
+      .tc-auth .tc-title { color: #7a5a2e; }
+      .tc-auth .tc-sub { color: #6b5436; }
 
-      .tc-h3 { font-family: 'Fraunces', serif; font-weight: 600; font-size: 1.25rem; margin: 0 0 16px; color: #f0e6d8; }
+      .tc-h3 {
+        font-family: 'Cinzel', serif; font-weight: 600; font-size: 1.2rem;
+        margin: 0 0 18px; color: #5a3e1e; text-align: center;
+        letter-spacing: 0.5px;
+      }
+      .tc-h3::after {
+        content: '❦'; display: block; color: #a8743a;
+        font-size: 1rem; margin-top: 6px;
+      }
+
       .tc-count {
-        background: #3a2c1f; color: #f5c97a; font-family: 'Nunito';
-        font-size: 0.8rem; font-weight: 700; padding: 1px 8px; border-radius: 20px; margin-left: 4px;
+        background: #7a5a2e; color: #f3e7cc; font-family: 'Cinzel', serif;
+        font-size: 0.7rem; font-weight: 600; padding: 2px 9px;
+        border-radius: 20px; margin-left: 4px; vertical-align: middle;
       }
 
       .tc-input {
-        display: block; width: 100%; padding: 13px 15px; margin: 8px 0;
-        background: #1a1410; border: 1px solid #3a2c1f; border-radius: 11px;
-        color: #f0e6d8; font-family: 'Nunito'; font-size: 1rem;
+        display: block; width: 100%; padding: 12px 14px; margin: 8px 0;
+        background: rgba(255,252,244,0.7); border: 1px solid #bfa478;
+        border-radius: 4px; color: #3a2c1a;
+        font-family: 'Cormorant Garamond', serif; font-size: 1.1rem;
         transition: border-color 0.2s, box-shadow 0.2s;
       }
-      .tc-input:focus { outline: none; border-color: #f5c97a; box-shadow: 0 0 0 3px rgba(245,201,122,0.15); }
-      .tc-input::placeholder { color: #6b5a48; }
-      .tc-textarea { height: 90px; resize: vertical; }
-      .tc-label { display: block; margin: 14px 0 2px; color: #b09a80; font-size: 0.9rem; font-weight: 600; }
+      .tc-input:focus {
+        outline: none; border-color: #8a5a28;
+        box-shadow: 0 0 0 3px rgba(168,116,58,0.2);
+        background: #fffdf6;
+      }
+      .tc-input::placeholder { color: #9a8867; font-style: italic; }
+      .tc-textarea { height: 90px; resize: vertical; line-height: 1.5; }
+      .tc-label {
+        display: block; margin: 14px 0 2px; color: #6b4e28;
+        font-size: 1rem; font-weight: 600; font-family: 'Cinzel', serif;
+        letter-spacing: 0.3px;
+      }
 
       .tc-btn {
-        padding: 12px 22px; border-radius: 11px; cursor: pointer;
-        font-family: 'Nunito'; font-weight: 700; font-size: 0.98rem;
+        padding: 12px 22px; border-radius: 5px; cursor: pointer;
+        font-family: 'Cinzel', serif; font-weight: 600; font-size: 0.95rem;
         border: 1px solid transparent; transition: transform 0.12s, filter 0.2s;
+        letter-spacing: 0.5px;
       }
       .tc-btn:active { transform: scale(0.97); }
-      .tc-btn-primary { background: linear-gradient(135deg, #f5c97a, #e0a955); color: #2a1f15; }
-      .tc-btn-primary:hover { filter: brightness(1.06); }
+      /* زر أساسي بلون ختم الشمع */
+      .tc-btn-primary {
+        background: linear-gradient(135deg, #9c3b2e 0%, #7a2820 100%);
+        color: #f3e7cc; border-color: #5a1c16;
+        box-shadow: 0 3px 8px rgba(0,0,0,0.3);
+      }
+      .tc-btn-primary:hover { filter: brightness(1.1); }
       .tc-btn-primary:disabled { opacity: 0.6; cursor: default; }
-      .tc-btn-ghost { background: transparent; border-color: #3a2c1f; color: #f0e6d8; }
-      .tc-btn-ghost:hover { background: #2a1f15; }
-      .tc-btn-sm { padding: 8px 16px; font-size: 0.85rem; }
-      .tc-btn-full { width: 100%; margin-top: 16px; }
-      .tc-auth-btns { display: flex; gap: 10px; margin-top: 8px; }
+      .tc-btn-ghost {
+        background: rgba(255,252,244,0.4); border-color: #bfa478; color: #5a3e1e;
+      }
+      .tc-btn-ghost:hover { background: rgba(255,252,244,0.7); }
+      .tc-btn-sm { padding: 8px 16px; font-size: 0.8rem; }
+      .tc-btn-full { width: 100%; margin-top: 18px; }
+      .tc-auth-btns { display: flex; gap: 10px; margin-top: 10px; }
       .tc-auth-btns .tc-btn { flex: 1; }
 
       .tc-rec-row { margin: 14px 0; }
-      .tc-btn-rec { background: #2a1f15; border-color: #3a2c1f; color: #f5c97a; width: 100%; }
-      .tc-btn-rec:hover { background: #32261a; }
+      .tc-btn-rec {
+        background: rgba(120,80,40,0.12); border-color: #bfa478; color: #6b4e28;
+        width: 100%; font-size: 0.95rem;
+      }
+      .tc-btn-rec:hover { background: rgba(120,80,40,0.2); }
       .tc-btn-stop {
-        background: #3a1a18; border-color: #6b2b28; color: #ff8a80; width: 100%;
+        background: linear-gradient(135deg, #9c3b2e, #7a2820); color: #f3e7cc;
+        border-color: #5a1c16; width: 100%;
         display: flex; align-items: center; justify-content: center; gap: 8px;
       }
-      .tc-pulse { width: 10px; height: 10px; border-radius: 50%; background: #ff5247; display: inline-block; animation: pulse 1s infinite; }
+      .tc-pulse { width: 10px; height: 10px; border-radius: 50%; background: #f3e7cc; display: inline-block; animation: pulse 1s infinite; }
 
       .tc-preview { margin: 12px 0; }
-      .tc-preview-label { color: #b09a80; font-size: 0.85rem; margin: 0 0 6px; }
-      .tc-audio { width: 100%; height: 40px; }
+      .tc-preview-label { color: #6b4e28; font-size: 0.95rem; margin: 0 0 6px; font-style: italic; }
+      .tc-audio { width: 100%; height: 38px; }
 
-      .tc-msg { color: #b09a80; font-size: 0.92rem; margin-top: 14px; text-align: center; }
-      .tc-empty { color: #6b5a48; font-style: italic; }
+      .tc-msg { color: #6b4e28; font-size: 1rem; margin-top: 14px; text-align: center; font-style: italic; }
+      .tc-empty { color: #8a7355; font-style: italic; text-align: center; font-size: 1.1rem; }
 
-      .tc-tabs { display: flex; gap: 8px; margin-bottom: 18px; }
+      .tc-tabs { display: flex; gap: 8px; margin-bottom: 20px; }
       .tc-tab {
-        flex: 1; padding: 11px; border-radius: 11px; cursor: pointer;
-        background: #241b14; border: 1px solid #3a2c1f; color: #b09a80;
-        font-family: 'Fraunces', serif; font-size: 1rem; font-weight: 600;
-        transition: all 0.2s;
+        flex: 1; padding: 12px; border-radius: 5px; cursor: pointer;
+        background: rgba(243,231,204,0.08); border: 1px solid #5a4632;
+        color: #b89968; font-family: 'Cinzel', serif; font-size: 0.95rem;
+        font-weight: 600; transition: all 0.2s; letter-spacing: 0.5px;
       }
-      .tc-tab.active { background: #3a2c1f; color: #f5c97a; border-color: #f5c97a; }
+      .tc-tab.active {
+        background: linear-gradient(135deg, #3a2c1a, #2a1f12);
+        color: #e8c074; border-color: #a8743a;
+        box-shadow: inset 0 0 12px rgba(168,116,58,0.2);
+      }
 
+      /* بطاقات الرسائل = ورق قديم */
       .tc-msg-card {
-        position: relative; background: #241b14; border: 1px solid #3a2c1f;
-        border-radius: 14px; padding: 18px; margin-bottom: 14px; animation: rise 0.4s ease both;
+        position: relative;
+        background: linear-gradient(135deg, #f3e7cc 0%, #e6d4ad 100%);
+        color: #3a2c1a; border: 1px solid #c9b186;
+        border-radius: 5px; padding: 20px; margin-bottom: 16px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.4), inset 0 0 0 1px rgba(180,150,110,0.3);
+        animation: rise 0.4s ease both;
       }
-      .tc-msg-card.locked { text-align: center; border-style: dashed; border-color: #4a3826; }
-      .tc-msg-card.unlocked { border-left: 3px solid #f5c97a; }
+      .tc-msg-card.locked {
+        text-align: center;
+        background: linear-gradient(135deg, #ece0c4 0%, #ddc9a0 100%);
+      }
+      .tc-msg-card.unlocked { border-left: 4px solid #9c3b2e; }
 
-      .tc-tag { font-size: 0.78rem; color: #8a7560; margin: 0 0 8px; font-weight: 600; }
-      .tc-msg-text { margin: 0 0 10px; line-height: 1.6; color: #f0e6d8; }
-      .tc-lock-icon { font-size: 1.6rem; margin-bottom: 4px; opacity: 0.7; }
-      .tc-locked-text { color: #8a7560; margin: 0; font-size: 0.85rem; }
-      .tc-locked-date { color: #f5c97a; margin: 2px 0 0; font-family: 'Fraunces', serif; font-size: 1.05rem; }
+      .tc-tag { font-size: 0.9rem; color: #8a5a28; margin: 0 0 10px; font-style: italic; }
+      .tc-msg-text { margin: 0 0 12px; line-height: 1.6; color: #2e2114; font-size: 1.2rem; }
+      .tc-wax { font-size: 1.8rem; margin-bottom: 6px; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.3)); }
+      .tc-locked-text { color: #6b4e28; margin: 0; font-size: 1rem; font-style: italic; }
+      .tc-locked-date {
+        color: #7a2820; margin: 3px 0 0; font-family: 'Cinzel', serif;
+        font-size: 1.05rem; font-weight: 600;
+      }
 
-      .tc-badge { display: inline-block; font-size: 0.78rem; font-weight: 700; padding: 3px 10px; border-radius: 20px; margin-top: 8px; }
-      .tc-badge-open { background: rgba(245,201,122,0.15); color: #f5c97a; }
+      .tc-badge {
+        display: inline-block; font-size: 0.8rem; font-weight: 600; padding: 3px 12px;
+        border-radius: 20px; margin-top: 8px; font-family: 'Cinzel', serif;
+        background: rgba(156,59,46,0.15); color: #9c3b2e;
+      }
 
       .tc-delete {
         position: absolute; top: 12px; right: 12px; width: 26px; height: 26px;
-        border-radius: 50%; background: transparent; border: none; color: #6b5a48;
-        cursor: pointer; font-size: 0.9rem; transition: color 0.2s, background 0.2s;
+        border-radius: 50%; background: transparent; border: none; color: #a89070;
+        cursor: pointer; font-size: 0.95rem; transition: color 0.2s, background 0.2s;
       }
-      .tc-delete:hover { color: #ff8a80; background: rgba(255,138,128,0.1); }
+      .tc-delete:hover { color: #9c3b2e; background: rgba(156,59,46,0.12); }
+
+      .tc-footer {
+        text-align: center; color: #6b5436; font-size: 1.3rem;
+        margin-top: 30px; letter-spacing: 8px;
+      }
 
       @keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
       @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
