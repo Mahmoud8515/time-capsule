@@ -1,7 +1,81 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from './supabaseClient'
 
+// قراءة رمز الكبسولة من الرابط: /c/CODE
+function getCapsuleCode() {
+  const m = window.location.pathname.match(/^\/c\/([A-Za-z0-9]+)/)
+  return m ? m[1] : null
+}
+
+// توليد رمز عشوائي للرابط
+function makeCode() {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
+  let s = ''
+  for (let i = 0; i < 8; i++) s += chars[Math.floor(Math.random() * chars.length)]
+  return s
+}
+
 function App() {
+  const capsuleCode = getCapsuleCode()
+
+  // لو الرابط رابط كبسولة → اعرض صفحة الضيف
+  if (capsuleCode) {
+    return <CapsulePage code={capsuleCode} />
+  }
+
+  return <MainApp />
+}
+
+// ============= صفحة الكبسولة (الضيف) — أساس فقط، نكملها المرحلة 3 =============
+function CapsulePage({ code }) {
+  const [capsule, setCapsule] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [notFound, setNotFound] = useState(false)
+
+  useEffect(() => {
+    loadCapsule()
+  }, [code])
+
+  async function loadCapsule() {
+    const { data, error } = await supabase
+      .from('capsules')
+      .select('*')
+      .eq('share_code', code)
+      .single()
+    if (error || !data) setNotFound(true)
+    else setCapsule(data)
+    setLoading(false)
+  }
+
+  return (
+    <>
+      <Styles />
+      <div className="tc-wrap" dir="ltr">
+        <header className="tc-header">
+          <h1 className="tc-title tc-title-sm">Time Capsule</h1>
+        </header>
+        <div className="tc-card">
+          {loading && <p className="tc-empty">Loading...</p>}
+          {notFound && <p className="tc-empty">This capsule link is invalid or no longer exists.</p>}
+          {capsule && (
+            <>
+              <h3 className="tc-h3">{capsule.title}</h3>
+              <p className="tc-msg">
+                This shared capsule will open on{' '}
+                {new Date(capsule.unlock_date).toLocaleString('en-GB', { timeZone: 'Europe/London', dateStyle: 'medium', timeStyle: 'short' })}.
+              </p>
+              <p className="tc-empty">Adding messages comes next (Stage 3).</p>
+            </>
+          )}
+        </div>
+        <footer className="tc-footer">✦ ❦ ✦</footer>
+      </div>
+    </>
+  )
+}
+
+// ============= التطبيق الرئيسي =============
+function MainApp() {
   const [session, setSession] = useState(null)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -27,6 +101,13 @@ function App() {
   const mediaRecorderRef = useRef(null)
   const chunksRef = useRef([])
 
+  // الكبسولات الجماعية
+  const [capsuleTitle, setCapsuleTitle] = useState('')
+  const [capsuleDate, setCapsuleDate] = useState('')
+  const [capsules, setCapsules] = useState([])
+  const [creatingCapsule, setCreatingCapsule] = useState(false)
+  const [copiedCode, setCopiedCode] = useState(null)
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => setSession(session))
     const { data: listener } = supabase.auth.onAuthStateChange((_e, session) => setSession(session))
@@ -34,7 +115,7 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (session) loadMessages()
+    if (session) { loadMessages(); loadCapsules() }
   }, [session])
 
   async function loadMessages() {
@@ -43,6 +124,15 @@ function App() {
       .select('*')
       .order('created_at', { ascending: false })
     if (!error) setMessages(data)
+  }
+
+  async function loadCapsules() {
+    const { data, error } = await supabase
+      .from('capsules')
+      .select('*')
+      .eq('owner_id', session.user.id)
+      .order('created_at', { ascending: false })
+    if (!error) setCapsules(data)
   }
 
   async function handleSignUp() {
@@ -174,6 +264,42 @@ function App() {
     setSaving(false)
   }
 
+  // إنشاء كبسولة جماعية
+  async function handleCreateCapsule() {
+    setMessage('')
+    if (!capsuleTitle.trim()) { setMessage('Please give the capsule a title.'); return }
+    if (!capsuleDate) { setMessage('Please choose an unlock date for the capsule.'); return }
+    setCreatingCapsule(true)
+    try {
+      const { error } = await supabase.from('capsules').insert({
+        owner_id: session.user.id,
+        title: capsuleTitle.trim(),
+        unlock_date: new Date(capsuleDate).toISOString(),
+        share_code: makeCode(),
+      })
+      if (error) throw error
+      setCapsuleTitle(''); setCapsuleDate('')
+      setMessage('Group capsule created! 🎉')
+      loadCapsules()
+    } catch (err) {
+      setMessage('Error: ' + err.message)
+    }
+    setCreatingCapsule(false)
+  }
+
+  async function handleDeleteCapsule(id) {
+    if (!window.confirm('Delete this group capsule and all its messages?')) return
+    const { error } = await supabase.from('capsules').delete().eq('id', id)
+    if (!error) loadCapsules()
+  }
+
+  function copyLink(code) {
+    const url = `${window.location.origin}/c/${code}`
+    navigator.clipboard.writeText(url)
+    setCopiedCode(code)
+    setTimeout(() => setCopiedCode(null), 2000)
+  }
+
   async function handleDelete(id) {
     if (!window.confirm('Delete this message permanently?')) return
     const { error } = await supabase.from('messages').delete().eq('id', id)
@@ -293,6 +419,48 @@ function App() {
             {saving ? 'Sealing...' : '🕯️ Seal Message'}
           </button>
           {message && <p className="tc-msg">{message}</p>}
+        </div>
+
+        {/* ===== قسم الكبسولة الجماعية ===== */}
+        <div className="tc-card">
+          <h3 className="tc-h3">Create a group capsule</h3>
+          <p className="tc-preview-label" style={{ textAlign: 'center' }}>
+            Invite family & friends to add their messages. Opens together on the date you choose.
+          </p>
+          <input
+            className="tc-input"
+            type="text"
+            placeholder="Capsule title (e.g. Baby Sara's 18th)"
+            value={capsuleTitle}
+            onChange={(e) => setCapsuleTitle(e.target.value)}
+          />
+          <label className="tc-label">Unlock date</label>
+          <input
+            className="tc-input"
+            type="datetime-local"
+            value={capsuleDate}
+            onChange={(e) => setCapsuleDate(e.target.value)}
+          />
+          <button className="tc-btn tc-btn-primary tc-btn-full" onClick={handleCreateCapsule} disabled={creatingCapsule}>
+            {creatingCapsule ? 'Creating...' : '✦ Create Group Capsule'}
+          </button>
+
+          {capsules.length > 0 && (
+            <div className="tc-capsule-list">
+              {capsules.map((c) => (
+                <div key={c.id} className="tc-capsule-item">
+                  <button className="tc-delete" onClick={() => handleDeleteCapsule(c.id)} title="Delete">✕</button>
+                  <p className="tc-capsule-title">{c.title}</p>
+                  <p className="tc-capsule-date">
+                    Opens {new Date(c.unlock_date).toLocaleString('en-GB', { timeZone: 'Europe/London', dateStyle: 'medium', timeStyle: 'short' })}
+                  </p>
+                  <button className="tc-btn tc-btn-ghost tc-btn-sm tc-copy-btn" onClick={() => copyLink(c.share_code)}>
+                    {copiedCode === c.share_code ? '✓ Link copied!' : '🔗 Copy invite link'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="tc-tabs">
@@ -429,6 +597,11 @@ function Styles() {
       .tc-badge { display: inline-block; font-size: 0.8rem; font-weight: 600; padding: 3px 12px; border-radius: 20px; margin-top: 8px; font-family: 'Cinzel', serif; background: rgba(156,59,46,0.15); color: #9c3b2e; }
       .tc-delete { position: absolute; top: 12px; right: 12px; width: 26px; height: 26px; border-radius: 50%; background: transparent; border: none; color: #a89070; cursor: pointer; font-size: 0.95rem; transition: color 0.2s, background 0.2s; }
       .tc-delete:hover { color: #9c3b2e; background: rgba(156,59,46,0.12); }
+      .tc-capsule-list { margin-top: 22px; }
+      .tc-capsule-item { position: relative; background: rgba(120,80,40,0.08); border: 1px solid #c9b186; border-radius: 5px; padding: 16px; margin-bottom: 12px; }
+      .tc-capsule-title { font-family: 'Cinzel', serif; font-weight: 600; color: #5a3e1e; margin: 0 0 4px; font-size: 1.05rem; }
+      .tc-capsule-date { color: #7a2820; margin: 0 0 12px; font-size: 0.95rem; font-style: italic; }
+      .tc-copy-btn { width: 100%; }
       .tc-footer { text-align: center; color: #6b5436; font-size: 1.3rem; margin-top: 30px; letter-spacing: 8px; }
       @keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
       @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
