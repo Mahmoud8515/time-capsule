@@ -216,7 +216,7 @@ function CapsulePage({ code }) {
               <input
                 className="tc-input"
                 type="text"
-                placeholder="e.g. Grandpa Ahmad"
+                placeholder="Your name"
                 value={authorName}
                 onChange={(e) => setAuthorName(e.target.value)}
               />
