@@ -21,11 +21,27 @@ function App() {
   return <MainApp />
 }
 
-// ============= صفحة الكبسولة (الضيف) — أساس فقط، نكملها المرحلة 3 =============
+// ============= صفحة الكبسولة (الضيف) =============
 function CapsulePage({ code }) {
   const [capsule, setCapsule] = useState(null)
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
+
+  const [authorName, setAuthorName] = useState('')
+  const [text, setText] = useState('')
+  const [msg, setMsg] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [done, setDone] = useState(false)
+
+  const [recording, setRecording] = useState(false)
+  const [audioBlob, setAudioBlob] = useState(null)
+  const [audioPreviewUrl, setAudioPreviewUrl] = useState(null)
+  const mediaRecorderRef = useRef(null)
+  const chunksRef = useRef([])
+
+  const [mediaFile, setMediaFile] = useState(null)
+  const [mediaPreview, setMediaPreview] = useState(null)
+  const [mediaType, setMediaType] = useState(null)
 
   useEffect(() => { loadCapsule() }, [code])
 
@@ -40,6 +56,139 @@ function CapsulePage({ code }) {
     setLoading(false)
   }
 
+  async function startRecording() {
+    setMsg('')
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      let mimeType = ''
+      if (MediaRecorder.isTypeSupported('audio/mp4')) mimeType = 'audio/mp4'
+      else if (MediaRecorder.isTypeSupported('audio/webm')) mimeType = 'audio/webm'
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream)
+      chunksRef.current = []
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data) }
+      recorder.onstop = () => {
+        const type = recorder.mimeType || 'audio/mp4'
+        const blob = new Blob(chunksRef.current, { type })
+        setAudioBlob(blob)
+        setAudioPreviewUrl(URL.createObjectURL(blob))
+        stream.getTracks().forEach((t) => t.stop())
+      }
+      recorder.start()
+      mediaRecorderRef.current = recorder
+      setRecording(true)
+    } catch (err) {
+      setMsg('Microphone access denied or unavailable.')
+    }
+  }
+
+  function stopRecording() {
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.stop()
+      setRecording(false)
+    }
+  }
+
+  function handleMediaPick(e) {
+    const file = e.target.files[0]
+    if (!file) return
+    if (file.size > 50 * 1024 * 1024) {
+      setMsg('File too large (max 50MB). Try a shorter clip.')
+      e.target.value = ''
+      return
+    }
+    const type = file.type.startsWith('video') ? 'video' : 'image'
+    setMediaFile(file)
+    setMediaType(type)
+    setMediaPreview(URL.createObjectURL(file))
+    e.target.value = ''
+  }
+
+  function clearMedia() {
+    setMediaFile(null)
+    setMediaPreview(null)
+    setMediaType(null)
+  }
+
+  async function uploadFile(file, folder, ext) {
+    const fileName = `capsules/${code}/${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`
+    const { error } = await supabase.storage.from('recordings').upload(fileName, file)
+    if (error) throw error
+    const { data } = supabase.storage.from('recordings').getPublicUrl(fileName)
+    return data.publicUrl
+  }
+
+  function resetForm() {
+    setText(''); setAudioBlob(null); setAudioPreviewUrl(null); clearMedia()
+  }
+
+  async function handleAdd() {
+    setMsg('')
+    if (!authorName.trim()) { setMsg('Please enter your name.'); return }
+    if (!text && !audioBlob && !mediaFile) {
+      setMsg('Please add a message, voice, photo, or video.'); return
+    }
+    setSaving(true)
+    try {
+      let audioUrl = null, imageUrl = null, videoUrl = null
+      if (audioBlob) {
+        const ext = audioBlob.type.includes('mp4') ? 'mp4' : 'webm'
+        audioUrl = await uploadFile(audioBlob, 'audio', ext)
+      }
+      if (mediaFile) {
+        const ext = mediaFile.name.split('.').pop() || (mediaType === 'video' ? 'mp4' : 'jpg')
+        const url = await uploadFile(mediaFile, mediaType === 'video' ? 'videos' : 'images', ext)
+        if (mediaType === 'video') videoUrl = url
+        else imageUrl = url
+      }
+      const { error } = await supabase.from('capsule_messages').insert({
+        capsule_id: capsule.id,
+        author_name: authorName.trim(),
+        text_content: text || null,
+        audio_url: audioUrl,
+        image_url: imageUrl,
+        video_url: videoUrl,
+      })
+      if (error) throw error
+      resetForm()
+      setDone(true)
+    } catch (err) {
+      setMsg('Error: ' + err.message)
+    }
+    setSaving(false)
+  }
+
+  function addAnother() {
+    setDone(false)
+    setMsg('')
+  }
+
+  // ===== الحالات =====
+  if (loading) {
+    return (
+      <>
+        <Styles />
+        <div className="tc-wrap" dir="ltr">
+          <header className="tc-header"><h1 className="tc-title tc-title-sm">Time Capsule</h1></header>
+          <div className="tc-card"><p className="tc-empty">Loading...</p></div>
+        </div>
+      </>
+    )
+  }
+
+  if (notFound) {
+    return (
+      <>
+        <Styles />
+        <div className="tc-wrap" dir="ltr">
+          <header className="tc-header"><h1 className="tc-title tc-title-sm">Time Capsule</h1></header>
+          <div className="tc-card"><p className="tc-empty">This capsule link is invalid or no longer exists.</p></div>
+        </div>
+      </>
+    )
+  }
+
+  const openDate = new Date(capsule.unlock_date).toLocaleString('en-GB', { timeZone: 'Europe/London', dateStyle: 'medium', timeStyle: 'short' })
+
   return (
     <>
       <Styles />
@@ -47,20 +196,81 @@ function CapsulePage({ code }) {
         <header className="tc-header">
           <h1 className="tc-title tc-title-sm">Time Capsule</h1>
         </header>
+
         <div className="tc-card">
-          {loading && <p className="tc-empty">Loading...</p>}
-          {notFound && <p className="tc-empty">This capsule link is invalid or no longer exists.</p>}
-          {capsule && (
+          <h3 className="tc-h3">{capsule.title}</h3>
+          <p className="tc-msg" style={{ marginTop: 0 }}>
+            A shared capsule that opens on {openDate}. Add your message below — it stays sealed until then.
+          </p>
+
+          {done ? (
+            <div style={{ textAlign: 'center' }}>
+              <div className="tc-wax" style={{ fontSize: '2.4rem' }}>🕯️</div>
+              <p className="tc-locked-date" style={{ fontSize: '1.3rem' }}>Your message was added!</p>
+              <p className="tc-msg" style={{ marginTop: 6 }}>It will be revealed when the capsule opens.</p>
+              <button className="tc-btn tc-btn-ghost tc-btn-full" onClick={addAnother}>✦ Add another message</button>
+            </div>
+          ) : (
             <>
-              <h3 className="tc-h3">{capsule.title}</h3>
-              <p className="tc-msg">
-                This shared capsule will open on{' '}
-                {new Date(capsule.unlock_date).toLocaleString('en-GB', { timeZone: 'Europe/London', dateStyle: 'medium', timeStyle: 'short' })}.
-              </p>
-              <p className="tc-empty">Adding messages comes next (Stage 3).</p>
+              <label className="tc-label">Your name</label>
+              <input
+                className="tc-input"
+                type="text"
+                placeholder="e.g. Grandpa Ahmad"
+                value={authorName}
+                onChange={(e) => setAuthorName(e.target.value)}
+              />
+
+              <label className="tc-label">Your message</label>
+              <textarea
+                className="tc-input tc-textarea"
+                placeholder="Write something for the future..."
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+              />
+
+              <div className="tc-rec-row">
+                {!recording ? (
+                  <button className="tc-btn tc-btn-rec" onClick={startRecording}>🪶 Record Voice</button>
+                ) : (
+                  <button className="tc-btn tc-btn-stop" onClick={stopRecording}>
+                    <span className="tc-pulse" /> Stop Recording
+                  </button>
+                )}
+              </div>
+              {audioPreviewUrl && (
+                <div className="tc-preview">
+                  <p className="tc-preview-label">Voice preview:</p>
+                  <audio controls src={audioPreviewUrl} className="tc-audio" />
+                </div>
+              )}
+
+              <div className="tc-rec-row">
+                <label className="tc-btn tc-btn-rec tc-media-btn-single">
+                  📸 Add Media
+                  <input type="file" accept="image/*,video/*" onChange={handleMediaPick} hidden />
+                </label>
+              </div>
+              {mediaPreview && (
+                <div className="tc-preview">
+                  <div className="tc-preview-head">
+                    <span className="tc-preview-label">{mediaType === 'video' ? 'Video' : 'Photo'} preview:</span>
+                    <button className="tc-clear-media" onClick={clearMedia}>✕ remove</button>
+                  </div>
+                  {mediaType === 'video'
+                    ? <video controls src={mediaPreview} className="tc-media-preview" />
+                    : <img src={mediaPreview} className="tc-media-preview" alt="preview" />}
+                </div>
+              )}
+
+              <button className="tc-btn tc-btn-primary tc-btn-full" onClick={handleAdd} disabled={saving}>
+                {saving ? 'Adding...' : '🕯️ Add to Capsule'}
+              </button>
+              {msg && <p className="tc-msg">{msg}</p>}
             </>
           )}
         </div>
+
         <footer className="tc-footer">✦ ❦ ✦</footer>
       </div>
     </>
@@ -206,7 +416,6 @@ function MainApp() {
     return data.publicUrl
   }
 
-  // يرفع الصوت/الميديا ويرجّع الروابط (مشترك بين الرسالة الفردية والكبسولة)
   async function uploadAttachments() {
     let audioUrl = null, imageUrl = null, videoUrl = null
     if (audioBlob) {
@@ -260,7 +469,6 @@ function MainApp() {
     setSaving(false)
   }
 
-  // الضغط على زر إنشاء كبسولة جماعية → نتحقق ثم نفتح نافذة العنوان
   function openCapsuleModal() {
     setMessage('')
     if (!text && !audioBlob && !mediaFile) {
@@ -275,14 +483,12 @@ function MainApp() {
     setShowTitleModal(true)
   }
 
-  // إنشاء الكبسولة + حفظ رسالة المنشئ كأول رسالة فيها
   async function handleCreateCapsule() {
     if (!capsuleTitle.trim()) return
     setCreatingCapsule(true)
     setMessage('')
     try {
       const shareCode = makeCode()
-      // 1) أنشئ الكبسولة
       const { data: capsule, error: capErr } = await supabase.from('capsules').insert({
         owner_id: session.user.id,
         title: capsuleTitle.trim(),
@@ -291,7 +497,6 @@ function MainApp() {
       }).select().single()
       if (capErr) throw capErr
 
-      // 2) ارفع مرفقات المنشئ واحفظ رسالته كأول رسالة في الكبسولة
       const { audioUrl, imageUrl, videoUrl } = await uploadAttachments()
       const authorName = session.user.email.split('@')[0]
       const { error: msgErr } = await supabase.from('capsule_messages').insert({
@@ -458,7 +663,6 @@ function MainApp() {
           {message && <p className="tc-msg">{message}</p>}
         </div>
 
-        {/* قائمة الكبسولات الجماعية */}
         {capsules.length > 0 && (
           <div className="tc-card">
             <h3 className="tc-h3">My group capsules</h3>
@@ -527,7 +731,6 @@ function MainApp() {
         <footer className="tc-footer">✦ ❦ ✦</footer>
       </div>
 
-      {/* نافذة عنوان الكبسولة */}
       {showTitleModal && (
         <div className="tc-modal-overlay" onClick={() => setShowTitleModal(false)}>
           <div className="tc-modal" onClick={(e) => e.stopPropagation()}>
