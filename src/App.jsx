@@ -17,12 +17,7 @@ function makeCode() {
 
 function App() {
   const capsuleCode = getCapsuleCode()
-
-  // لو الرابط رابط كبسولة → اعرض صفحة الضيف
-  if (capsuleCode) {
-    return <CapsulePage code={capsuleCode} />
-  }
-
+  if (capsuleCode) return <CapsulePage code={capsuleCode} />
   return <MainApp />
 }
 
@@ -32,9 +27,7 @@ function CapsulePage({ code }) {
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
 
-  useEffect(() => {
-    loadCapsule()
-  }, [code])
+  useEffect(() => { loadCapsule() }, [code])
 
   async function loadCapsule() {
     const { data, error } = await supabase
@@ -91,22 +84,20 @@ function MainApp() {
   const [audioBlob, setAudioBlob] = useState(null)
   const [audioPreviewUrl, setAudioPreviewUrl] = useState(null)
 
-  // ميديا موحّدة (صورة أو فيديو)
   const [mediaFile, setMediaFile] = useState(null)
   const [mediaPreview, setMediaPreview] = useState(null)
-  const [mediaType, setMediaType] = useState(null) // 'image' | 'video'
-  const [showMediaMenu, setShowMediaMenu] = useState(false)
+  const [mediaType, setMediaType] = useState(null)
 
   const [saving, setSaving] = useState(false)
   const mediaRecorderRef = useRef(null)
   const chunksRef = useRef([])
 
   // الكبسولات الجماعية
-  const [capsuleTitle, setCapsuleTitle] = useState('')
-  const [capsuleDate, setCapsuleDate] = useState('')
   const [capsules, setCapsules] = useState([])
-  const [creatingCapsule, setCreatingCapsule] = useState(false)
   const [copiedCode, setCopiedCode] = useState(null)
+  const [showTitleModal, setShowTitleModal] = useState(false)
+  const [capsuleTitle, setCapsuleTitle] = useState('')
+  const [creatingCapsule, setCreatingCapsule] = useState(false)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => setSession(session))
@@ -186,10 +177,8 @@ function MainApp() {
     }
   }
 
-  // اختيار ميديا (يكتشف النوع تلقائياً)
   function handleMediaPick(e) {
     const file = e.target.files[0]
-    setShowMediaMenu(false)
     if (!file) return
     if (file.size > 50 * 1024 * 1024) {
       setMessage('File too large (max 50MB). Try a shorter clip.')
@@ -217,6 +206,28 @@ function MainApp() {
     return data.publicUrl
   }
 
+  // يرفع الصوت/الميديا ويرجّع الروابط (مشترك بين الرسالة الفردية والكبسولة)
+  async function uploadAttachments() {
+    let audioUrl = null, imageUrl = null, videoUrl = null
+    if (audioBlob) {
+      const ext = audioBlob.type.includes('mp4') ? 'mp4' : 'webm'
+      audioUrl = await uploadFile(audioBlob, 'audio', ext)
+    }
+    if (mediaFile) {
+      const ext = mediaFile.name.split('.').pop() || (mediaType === 'video' ? 'mp4' : 'jpg')
+      const url = await uploadFile(mediaFile, mediaType === 'video' ? 'videos' : 'images', ext)
+      if (mediaType === 'video') videoUrl = url
+      else imageUrl = url
+    }
+    return { audioUrl, imageUrl, videoUrl }
+  }
+
+  function clearForm() {
+    setText(''); setUnlockDate(''); setRecipientEmail('')
+    setAudioBlob(null); setAudioPreviewUrl(null)
+    clearMedia()
+  }
+
   async function handleSaveMessage() {
     setMessage('')
     if (!text && !audioBlob && !mediaFile) {
@@ -229,19 +240,7 @@ function MainApp() {
     }
     setSaving(true)
     try {
-      let audioUrl = null, imageUrl = null, videoUrl = null
-
-      if (audioBlob) {
-        const ext = audioBlob.type.includes('mp4') ? 'mp4' : 'webm'
-        audioUrl = await uploadFile(audioBlob, 'audio', ext)
-      }
-      if (mediaFile) {
-        const ext = mediaFile.name.split('.').pop() || (mediaType === 'video' ? 'mp4' : 'jpg')
-        const url = await uploadFile(mediaFile, mediaType === 'video' ? 'videos' : 'images', ext)
-        if (mediaType === 'video') videoUrl = url
-        else imageUrl = url
-      }
-
+      const { audioUrl, imageUrl, videoUrl } = await uploadAttachments()
       const { error } = await supabase.from('messages').insert({
         user_id: session.user.id,
         text_content: text || null,
@@ -252,10 +251,7 @@ function MainApp() {
         recipient_email: recipientEmail.trim().toLowerCase() || null,
       })
       if (error) throw error
-
-      setText(''); setUnlockDate(''); setRecipientEmail('')
-      setAudioBlob(null); setAudioPreviewUrl(null)
-      clearMedia()
+      clearForm()
       setMessage('Message sealed! 🎉')
       loadMessages()
     } catch (err) {
@@ -264,22 +260,53 @@ function MainApp() {
     setSaving(false)
   }
 
-  // إنشاء كبسولة جماعية
-  async function handleCreateCapsule() {
+  // الضغط على زر إنشاء كبسولة جماعية → نتحقق ثم نفتح نافذة العنوان
+  function openCapsuleModal() {
     setMessage('')
-    if (!capsuleTitle.trim()) { setMessage('Please give the capsule a title.'); return }
-    if (!capsuleDate) { setMessage('Please choose an unlock date for the capsule.'); return }
+    if (!text && !audioBlob && !mediaFile) {
+      setMessage('Write your own message first — it becomes the first message in the capsule.')
+      return
+    }
+    if (!unlockDate) {
+      setMessage('Please choose an unlock date.')
+      return
+    }
+    setCapsuleTitle('')
+    setShowTitleModal(true)
+  }
+
+  // إنشاء الكبسولة + حفظ رسالة المنشئ كأول رسالة فيها
+  async function handleCreateCapsule() {
+    if (!capsuleTitle.trim()) return
     setCreatingCapsule(true)
+    setMessage('')
     try {
-      const { error } = await supabase.from('capsules').insert({
+      const shareCode = makeCode()
+      // 1) أنشئ الكبسولة
+      const { data: capsule, error: capErr } = await supabase.from('capsules').insert({
         owner_id: session.user.id,
         title: capsuleTitle.trim(),
-        unlock_date: new Date(capsuleDate).toISOString(),
-        share_code: makeCode(),
+        unlock_date: new Date(unlockDate).toISOString(),
+        share_code: shareCode,
+      }).select().single()
+      if (capErr) throw capErr
+
+      // 2) ارفع مرفقات المنشئ واحفظ رسالته كأول رسالة في الكبسولة
+      const { audioUrl, imageUrl, videoUrl } = await uploadAttachments()
+      const authorName = session.user.email.split('@')[0]
+      const { error: msgErr } = await supabase.from('capsule_messages').insert({
+        capsule_id: capsule.id,
+        author_name: authorName,
+        text_content: text || null,
+        audio_url: audioUrl,
+        image_url: imageUrl,
+        video_url: videoUrl,
       })
-      if (error) throw error
-      setCapsuleTitle(''); setCapsuleDate('')
-      setMessage('Group capsule created! 🎉')
+      if (msgErr) throw msgErr
+
+      setShowTitleModal(false)
+      clearForm()
+      setMessage('Group capsule created! 🎉 Copy the link below to invite others.')
       loadCapsules()
     } catch (err) {
       setMessage('Error: ' + err.message)
@@ -380,7 +407,6 @@ function MainApp() {
             </div>
           )}
 
-          {/* زر الميديا الموحّد */}
           <div className="tc-rec-row">
             <label className="tc-btn tc-btn-rec tc-media-btn-single">
               📸 Add Media
@@ -415,53 +441,41 @@ function MainApp() {
             value={unlockDate}
             onChange={(e) => setUnlockDate(e.target.value)}
           />
+
           <button className="tc-btn tc-btn-primary tc-btn-full" onClick={handleSaveMessage} disabled={saving}>
             {saving ? 'Sealing...' : '🕯️ Seal Message'}
           </button>
+
+          <div className="tc-or"><span>or</span></div>
+
+          <button className="tc-btn tc-btn-group tc-btn-full" onClick={openCapsuleModal}>
+            ✦ Create Group Capsule
+          </button>
+          <p className="tc-group-hint">
+            Your message above becomes the first one. Invite others with a link.
+          </p>
+
           {message && <p className="tc-msg">{message}</p>}
         </div>
 
-        {/* ===== قسم الكبسولة الجماعية ===== */}
-        <div className="tc-card">
-          <h3 className="tc-h3">Create a group capsule</h3>
-          <p className="tc-preview-label" style={{ textAlign: 'center' }}>
-            Invite family & friends to add their messages. Opens together on the date you choose.
-          </p>
-          <input
-            className="tc-input"
-            type="text"
-            placeholder="Capsule title (e.g. Baby Sara's 18th)"
-            value={capsuleTitle}
-            onChange={(e) => setCapsuleTitle(e.target.value)}
-          />
-          <label className="tc-label">Unlock date</label>
-          <input
-            className="tc-input"
-            type="datetime-local"
-            value={capsuleDate}
-            onChange={(e) => setCapsuleDate(e.target.value)}
-          />
-          <button className="tc-btn tc-btn-primary tc-btn-full" onClick={handleCreateCapsule} disabled={creatingCapsule}>
-            {creatingCapsule ? 'Creating...' : '✦ Create Group Capsule'}
-          </button>
-
-          {capsules.length > 0 && (
-            <div className="tc-capsule-list">
-              {capsules.map((c) => (
-                <div key={c.id} className="tc-capsule-item">
-                  <button className="tc-delete" onClick={() => handleDeleteCapsule(c.id)} title="Delete">✕</button>
-                  <p className="tc-capsule-title">{c.title}</p>
-                  <p className="tc-capsule-date">
-                    Opens {new Date(c.unlock_date).toLocaleString('en-GB', { timeZone: 'Europe/London', dateStyle: 'medium', timeStyle: 'short' })}
-                  </p>
-                  <button className="tc-btn tc-btn-ghost tc-btn-sm tc-copy-btn" onClick={() => copyLink(c.share_code)}>
-                    {copiedCode === c.share_code ? '✓ Link copied!' : '🔗 Copy invite link'}
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        {/* قائمة الكبسولات الجماعية */}
+        {capsules.length > 0 && (
+          <div className="tc-card">
+            <h3 className="tc-h3">My group capsules</h3>
+            {capsules.map((c) => (
+              <div key={c.id} className="tc-capsule-item">
+                <button className="tc-delete" onClick={() => handleDeleteCapsule(c.id)} title="Delete">✕</button>
+                <p className="tc-capsule-title">{c.title}</p>
+                <p className="tc-capsule-date">
+                  Opens {new Date(c.unlock_date).toLocaleString('en-GB', { timeZone: 'Europe/London', dateStyle: 'medium', timeStyle: 'short' })}
+                </p>
+                <button className="tc-btn tc-btn-ghost tc-btn-sm tc-copy-btn" onClick={() => copyLink(c.share_code)}>
+                  {copiedCode === c.share_code ? '✓ Link copied!' : '🔗 Copy invite link'}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
 
         <div className="tc-tabs">
           <button className={`tc-tab ${tab === 'mine' ? 'active' : ''}`} onClick={() => setTab('mine')}>
@@ -512,6 +526,34 @@ function MainApp() {
 
         <footer className="tc-footer">✦ ❦ ✦</footer>
       </div>
+
+      {/* نافذة عنوان الكبسولة */}
+      {showTitleModal && (
+        <div className="tc-modal-overlay" onClick={() => setShowTitleModal(false)}>
+          <div className="tc-modal" onClick={(e) => e.stopPropagation()}>
+            <h3 className="tc-h3">Name your group capsule</h3>
+            <p className="tc-preview-label" style={{ textAlign: 'center' }}>
+              This is what guests will see when they open the link.
+            </p>
+            <input
+              className="tc-input"
+              type="text"
+              placeholder="e.g. Baby Sara's 18th Birthday"
+              value={capsuleTitle}
+              onChange={(e) => setCapsuleTitle(e.target.value)}
+              autoFocus
+            />
+            <div className="tc-auth-btns" style={{ marginTop: 16 }}>
+              <button className="tc-btn tc-btn-primary" onClick={handleCreateCapsule} disabled={creatingCapsule || !capsuleTitle.trim()}>
+                {creatingCapsule ? 'Creating...' : 'Create'}
+              </button>
+              <button className="tc-btn tc-btn-ghost" onClick={() => setShowTitleModal(false)} disabled={creatingCapsule}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }
@@ -564,6 +606,12 @@ function Styles() {
       .tc-btn-ghost:hover { background: rgba(255,252,244,0.7); }
       .tc-btn-sm { padding: 8px 16px; font-size: 0.8rem; }
       .tc-btn-full { width: 100%; margin-top: 18px; }
+      .tc-btn-group { background: linear-gradient(135deg, #5a3e1e, #3a2812); color: #e8c074; border-color: #2a1c0e; box-shadow: 0 3px 8px rgba(0,0,0,0.3); margin-top: 0; }
+      .tc-btn-group:hover { filter: brightness(1.15); }
+      .tc-or { display: flex; align-items: center; text-align: center; color: #8a6a3a; margin: 20px 0 14px; font-style: italic; }
+      .tc-or::before, .tc-or::after { content: ''; flex: 1; height: 1px; background: rgba(120,90,50,0.35); }
+      .tc-or span { padding: 0 14px; font-size: 1rem; }
+      .tc-group-hint { text-align: center; color: #6b4e28; font-size: 0.9rem; font-style: italic; margin: 10px 0 0; }
       .tc-auth-btns { display: flex; gap: 10px; margin-top: 10px; }
       .tc-auth-btns .tc-btn { flex: 1; }
       .tc-rec-row { margin: 14px 0; }
@@ -572,9 +620,6 @@ function Styles() {
       .tc-media-btn-single { display: block; width: 100%; text-align: center; }
       .tc-btn-stop { background: linear-gradient(135deg, #9c3b2e, #7a2820); color: #f3e7cc; border-color: #5a1c16; width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; }
       .tc-pulse { width: 10px; height: 10px; border-radius: 50%; background: #f3e7cc; display: inline-block; animation: pulse 1s infinite; }
-      .tc-media-menu { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 8px; padding: 12px; background: rgba(120,80,40,0.08); border: 1px dashed #bfa478; border-radius: 5px; }
-      .tc-media-opt { display: block; text-align: center; padding: 11px; border-radius: 5px; cursor: pointer; background: rgba(255,252,244,0.5); border: 1px solid #bfa478; color: #5a3e1e; font-family: 'Cinzel', serif; font-size: 0.9rem; font-weight: 600; transition: background 0.2s; }
-      .tc-media-opt:hover { background: rgba(255,252,244,0.85); }
       .tc-media-preview { width: 100%; border-radius: 5px; margin-top: 4px; border: 1px solid #c9b186; max-height: 320px; object-fit: contain; background: #2a1f15; }
       .tc-preview { margin: 12px 0; }
       .tc-preview-head { display: flex; justify-content: space-between; align-items: center; }
@@ -597,13 +642,15 @@ function Styles() {
       .tc-badge { display: inline-block; font-size: 0.8rem; font-weight: 600; padding: 3px 12px; border-radius: 20px; margin-top: 8px; font-family: 'Cinzel', serif; background: rgba(156,59,46,0.15); color: #9c3b2e; }
       .tc-delete { position: absolute; top: 12px; right: 12px; width: 26px; height: 26px; border-radius: 50%; background: transparent; border: none; color: #a89070; cursor: pointer; font-size: 0.95rem; transition: color 0.2s, background 0.2s; }
       .tc-delete:hover { color: #9c3b2e; background: rgba(156,59,46,0.12); }
-      .tc-capsule-list { margin-top: 22px; }
       .tc-capsule-item { position: relative; background: rgba(120,80,40,0.08); border: 1px solid #c9b186; border-radius: 5px; padding: 16px; margin-bottom: 12px; }
       .tc-capsule-title { font-family: 'Cinzel', serif; font-weight: 600; color: #5a3e1e; margin: 0 0 4px; font-size: 1.05rem; }
       .tc-capsule-date { color: #7a2820; margin: 0 0 12px; font-size: 0.95rem; font-style: italic; }
       .tc-copy-btn { width: 100%; }
+      .tc-modal-overlay { position: fixed; inset: 0; background: rgba(20,14,8,0.75); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 100; animation: fade 0.2s ease; }
+      .tc-modal { background: linear-gradient(135deg, #f3e7cc 0%, #e8d7b3 100%); border: 1px solid #c9b186; border-radius: 6px; padding: 28px; max-width: 440px; width: 100%; box-shadow: 0 20px 60px rgba(0,0,0,0.6), inset 0 0 0 2px rgba(180,150,110,0.3); animation: rise 0.3s ease both; }
       .tc-footer { text-align: center; color: #6b5436; font-size: 1.3rem; margin-top: 30px; letter-spacing: 8px; }
       @keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+      @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
       @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
     `}</style>
   )
